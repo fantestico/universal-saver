@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SavedItem, Folder } from '../types';
 import Tag from './Tag';
 import { TrashIcon, MoreHorizontalIcon, FolderIcon } from './icons';
-import { Timestamp } from 'firebase/firestore';
 
 interface SavedItemCardProps {
   item: SavedItem;
@@ -30,9 +29,9 @@ const SavedItemCard: React.FC<SavedItemCardProps> = ({ item, onDelete, folders, 
     setMenuOpen(false);
   };
 
-  const timeAgo = (date: string | Timestamp): string => {
-    const dateObj = typeof date === 'string' ? new Date(date) : date.toDate();
-    const seconds = Math.floor((new Date().getTime() - dateObj.getTime()) / 1000);
+  const timeAgo = (dateString: string): string => {
+    const date = new Date(dateString);
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
     if (seconds < 5) return "just now";
     let interval = seconds / 31536000;
     if (interval > 1) return Math.floor(interval) + "y ago";
@@ -93,7 +92,7 @@ const SavedItemCard: React.FC<SavedItemCardProps> = ({ item, onDelete, folders, 
         <div className="flex flex-wrap gap-2 mt-2">
           {item.tags.map(tag => <Tag key={tag} label={tag} />)}
         </div>
-        <p className="text-xs text-medium mt-3 text-right">{timeAgo(item.createdAt)}</p>
+        <p className="text-xs text-medium mt-3 text-right">{item.createdAt ? timeAgo(item.createdAt) : ''}</p>
       </div>
     </div>
   );

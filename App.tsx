@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, writeBatch, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from './firebase/config';
+import { v4 as uuidv4 } from 'uuid'; // We'll need a way to generate unique IDs
 import { SavedItem, Folder } from './types';
+import { useLocalStorage } from './hooks/useLocalStorage';
 import Header from './components/Header';
 import SaveForm from './components/SaveForm';
 import ItemList from './components/ItemList';
@@ -10,51 +9,17 @@ import SearchBar from './components/SearchBar';
 import Chatbot from './components/Chatbot';
 import { ChatIcon } from './components/icons';
 import FolderNavigation from './components/FolderNavigation';
-import Login from './components/Login';
+
+// Helper to generate a unique ID
+const generateId = () => uuidv4();
 
 const App: React.FC = () => {
-  const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
-  const [folders, setFolders] = useState<Folder[]>([]);
+  const [savedItems, setSavedItems] = useLocalStorage<SavedItem[]>('savedItems', []);
+  const [folders, setFolders] = useLocalStorage<Folder[]>('folders', []);
   const [searchTerm, setSearchTerm] = useState('');
   const [isChatOpen, setChatOpen] = useState(false);
   const [initialUrl, setInitialUrl] = useState('');
   const [selectedFolderId, setSelectedFolderId] = useState('all');
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!user) {
-      setSavedItems([]);
-      setFolders([]);
-      return;
-    }
-
-    const itemsCollection = collection(db, 'users', user.uid, 'items');
-    const foldersCollection = collection(db, 'users', user.uid, 'folders');
-
-    const unsubscribeItems = onSnapshot(itemsCollection, (snapshot) => {
-      const itemsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as SavedItem[];
-      setSavedItems(itemsData);
-    });
-
-    const unsubscribeFolders = onSnapshot(foldersCollection, (snapshot) => {
-      const foldersData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as Folder[];
-      setFolders(foldersData);
-    });
-
-    return () => {
-      unsubscribeItems();
-      unsubscribeFolders();
-    };
-  }, [user]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -65,52 +30,47 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleSaveItem = async (item: Omit<SavedItem, 'id' | 'createdAt'>) => {
-    if (!user) return;
-    const itemsCollection = collection(db, 'users', user.uid, 'items');
-    await addDoc(itemsCollection, {...item, createdAt: serverTimestamp() });
+  const handleSaveItem = (item: Omit<SavedItem, 'id' | 'createdAt'>) => {
+    const newItem: SavedItem = {
+      ...item,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+    };
+    setSavedItems(prevItems => [newItem, ...prevItems]);
   };
 
-  const handleDeleteItem = async (id: string) => {
-    if (!user) return;
-    const itemDoc = doc(db, 'users', user.uid, 'items', id);
-    await deleteDoc(itemDoc);
+  const handleDeleteItem = (id: string) => {
+    setSavedItems(prevItems => prevItems.filter(item => item.id !== id));
   };
 
-  const handleCreateFolder = async (name: string) => {
-    if (!user) return;
+  const handleCreateFolder = (name: string) => {
     if (name && !folders.some(f => f.name === name)) {
-      const foldersCollection = collection(db, 'users', user.uid, 'folders');
-      await addDoc(foldersCollection, { name });
+      const newFolder: Folder = { id: generateId(), name };
+      setFolders(prevFolders => [...prevFolders, newFolder]);
     }
   };
 
-  const handleDeleteFolder = async (folderId: string) => {
-    if (!user) return;
+  const handleDeleteFolder = (folderId: string) => {
+    // Move items from the deleted folder to 'uncategorized'
+    setSavedItems(prevItems =>
+      prevItems.map(item =>
+        item.folderId === folderId ? { ...item, folderId: 'uncategorized' } : item
+      )
+    );
+    // Remove the folder itself
+    setFolders(prevFolders => prevFolders.filter(folder => folder.id !== folderId));
     
-    const batch = writeBatch(db);
-    const itemsCollectionRef = collection(db, 'users', user.uid, 'items');
-    const q = query(itemsCollectionRef, where("folderId", "==", folderId));
-    const querySnapshot = await getDocs(q);
-    
-    querySnapshot.forEach((doc) => {
-        batch.update(doc.ref, { folderId: "uncategorized" });
-    });
-
-    const folderDocRef = doc(db, 'users', user.uid, 'folders', folderId);
-    batch.delete(folderDocRef);
-
-    await batch.commit();
-
     if (selectedFolderId === folderId) {
       setSelectedFolderId('all');
     }
   };
 
-  const handleMoveItemToFolder = async (itemId: string, folderId: string) => {
-    if (!user) return;
-    const itemDoc = doc(db, 'users', user.uid, 'items', itemId);
-    await updateDoc(itemDoc, { folderId });
+  const handleMoveItemToFolder = (itemId: string, folderId: string) => {
+    setSavedItems(prevItems =>
+      prevItems.map(item =>
+        item.id === itemId ? { ...item, folderId: folderId } : item
+      )
+    );
   };
 
   const filteredItems = useMemo(() => {
@@ -127,9 +87,19 @@ const App: React.FC = () => {
     return folderFiltered.filter(item =>
       item.url.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
+      (item.tags && item.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())))
     );
   }, [savedItems, searchTerm, selectedFolderId]);
+
+  useEffect(() => {
+    // Install uuid for id generation if not present
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/uuid/8.3.2/uuid.min.js';
+    script.onload = () => {
+      console.log('uuid loaded');
+    };
+    document.head.appendChild(script);
+  }, []);
 
   useEffect(() => {
     if (isChatOpen) {
@@ -139,21 +109,9 @@ const App: React.FC = () => {
     }
   }, [isChatOpen]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-primary flex items-center justify-center">
-        <p className="text-light">Loading...</p>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Login />;
-  }
-
   return (
     <div className="min-h-screen bg-primary font-sans">
-      <Header user={user} />
+      <Header />
       <main className="container mx-auto p-4 max-w-2xl pb-24">
         <SaveForm onSave={handleSaveItem} initialUrl={initialUrl} selectedFolderId={selectedFolderId} />
         <div className="my-6 space-y-4">
@@ -186,5 +144,24 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+// A simple polyfill for uuidv4 if the script hasn't loaded yet.
+const uuidv4 = () => {
+  if (window.uuid) {
+    return window.uuid.v4();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+declare global {
+  interface Window {
+    uuid: {
+      v4: () => string;
+    };
+  }
+}
 
 export default App;

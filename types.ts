@@ -1,12 +1,10 @@
-import { Timestamp } from 'firebase/firestore';
-
 export interface SavedItem {
   id: string;
   url: string;
   thumbnailUrl: string;
   tags: string[];
   description: string;
-  createdAt: Timestamp | string;
+  createdAt: string;
   folderId: string;
 }
 
