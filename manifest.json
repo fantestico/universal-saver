@@ -1,0 +1,17 @@
+{
+  "name": "Universal Saver",
+  "short_name": "Saver",
+  "description": "Save links from anywhere, add descriptions, and find them later.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0D1117",
+  "theme_color": "#0D1117",
+  "share_target": {
+    "action": "/",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "sharedUrl"
+    }
+  }
+}
